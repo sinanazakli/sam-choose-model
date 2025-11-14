@@ -1,9 +1,13 @@
 from sklearn.datasets import load_iris
-# from sam.automl_classifier_pro import AutoMLClassifierPro
-from sam.automl_classifier_pro_plus import AutoMLClassifierProPlus
+from sam.automl.automl_classifier_pro import AutoMLClassifierPro
+from sam.automl.automl_classifier_pro_plus import AutoMLClassifierProPlus
+from sam.helper.formatter import format_pipeline_info
+
 # Datensatz laden
 iris = load_iris()
-# automl = AutoMLClassifierPro()
+
+# AutoML-Instanzen erstellen
+automl = AutoMLClassifierPro()
 automl_plus = AutoMLClassifierProPlus()
 
 # Standardwerte
@@ -18,3 +22,7 @@ print("\nErgebnisse:")
 print(df_results)
 print("\nBestes Modell:")
 print(best_model)
+
+print("\nBestes Modell mit formatierter Ausgabe:")
+
+print(format_pipeline_info(best_model))
