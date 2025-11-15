@@ -6,7 +6,7 @@ This repository provides an **AutoML class for classification tasks** that autom
 The **AutoMLClassifierProPlus** class supports:
 
 - ✅ Automatic hyperparameter tuning using `RandomizedSearchCV`
-- ✅ Scaling for models that require it
+- ✅ StandardScalor for Scaling for models that require it
 - ✅ Model comparison based on **F1 score**, **Accuracy**, and **ROC-AUC**
 - ✅ Low-memory option for large datasets
 - ✅ Clear results output as a `DataFrame`
@@ -29,7 +29,7 @@ Dieses Repository bietet eine AutoML-Klasse für Klassifikationsprobleme, die me
 Die Klasse AutoMLClassifierProPlus unterstützt:
 
 ✅ Automatische Hyperparameter-Suche mit RandomizedSearchCV
-✅ Skalierung für Modelle, die es benötigen
+✅ StandardScalor für Skalierung für Modelle, die es benötigen
 ✅ Vergleich von Modellen anhand von F1-Score, Accuracy und ROC-AUC
 ✅ Low-Memory-Option für große Datensätze
 ✅ Übersichtliche Ausgabe der Ergebnisse als DataFrame
