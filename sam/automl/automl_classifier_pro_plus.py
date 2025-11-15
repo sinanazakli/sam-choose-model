@@ -1,3 +1,4 @@
+import time
 import warnings
 from sklearn.model_selection import train_test_split, StratifiedKFold, RandomizedSearchCV
 from sklearn.pipeline import Pipeline
@@ -205,13 +206,12 @@ class AutoMLClassifierProPlus:
             }
         }
     ]
-    
+
     def __init__(self, model_list=model_list, scoring='f1', n_iter=20, random_state=42, suppress_warnings=True):
         """
-        Optimierte AutoML-Klasse für Klassifikation mit automatischer Anpassung von max_iter und early_stopping.
+        AutoML-Klasse mit Low-Memory-Option, Zeitmessung und flexibler Datensatzverarbeitung.
         """
-        # self.model_list = self._adjust_models(model_list)
-        # self.model_list = model_list
+        self.model_list = model_list
         self.scoring = scoring
         self.n_iter = n_iter
         self.random_state = random_state
@@ -221,54 +221,31 @@ class AutoMLClassifierProPlus:
         if suppress_warnings:
             warnings.filterwarnings("ignore")
 
-    def _adjust_models(self, model_list):
-        """
-        Passt max_iter und early_stopping für relevante Modelle an.
-        """
-        adjusted_list = []
-        for m in model_list:
-            model = m['model']
-            if m['name'] in ['LogisticRegression', 'LinearSVC', 'SGDClassifier']:
-                if hasattr(model, 'max_iter'):
-                    model.set_params(max_iter=5000)
-            if m['name'] == 'MLPClassifier':
-                model.set_params(max_iter=2000, early_stopping=True)
-            adjusted_list.append({**m, 'model': model})
-        return adjusted_list
-
     def _needs_scaling(self, model_name):
-        """
-        Prüft, ob ein Modell Skalierung benötigt.
-        """
         scale_models = ['LogisticRegression', 'RidgeClassifier', 'SGDClassifier', 'SVC', 'LinearSVC', 'MLPClassifier']
         return model_name in scale_models
 
     def _automl_classification(self, X_train, y_train, X_test=None, y_test=None):
-        """
-        Führt RandomizedSearchCV für alle Modelle aus und berechnet zusätzliche Metriken.
-        """
         results = []
         best_score = -np.inf
         scorer = make_scorer(f1_score, average='weighted') if self.scoring == 'f1' else self.scoring
 
+        total_start = time.time()
         for m in self.model_list:
-            print(f"🔍 Starte Suche für: {m['name']} ...")
+            print(f"\n🔍 Starte Suche für: {m['name']} ...")
+            start_time = time.time()
 
-            # Pipeline mit optionalem StandardScaler
             steps = []
             if self._needs_scaling(m['name']):
                 steps.append(('scaler', StandardScaler()))
             steps.append(('model', m['model']))
             pipeline = Pipeline(steps)
 
-            # CV-Strategie
             cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=self.random_state)
 
-            # Dynamische Anpassung von n_iter
             param_space_size = np.prod([len(v) if hasattr(v, '__len__') else 1 for v in m['param_grid'].values()])
             n_iter = min(self.n_iter, param_space_size)
 
-            # RandomizedSearchCV
             search = RandomizedSearchCV(
                 estimator=pipeline,
                 param_distributions=m['param_grid'],
@@ -276,20 +253,19 @@ class AutoMLClassifierProPlus:
                 scoring=scorer,
                 cv=cv,
                 random_state=self.random_state,
-                n_jobs=-1
+                n_jobs=2,  # Begrenzung für Stabilität
+                pre_dispatch=2
             )
 
             search.fit(X_train, y_train)
             best_params = search.best_params_
             best_cv_score = search.best_score_
 
-            # Test-Metriken berechnen
             acc, f1, roc_auc = None, None, None
             if X_test is not None and y_test is not None:
                 y_pred = search.predict(X_test)
                 acc = accuracy_score(y_test, y_pred)
                 f1 = f1_score(y_test, y_pred, average='weighted')
-
                 try:
                     y_proba = search.predict_proba(X_test)
                     if y_proba.shape[1] == 2:
@@ -299,7 +275,6 @@ class AutoMLClassifierProPlus:
                 except:
                     roc_auc = None
 
-            # Ergebnisse speichern
             results.append({
                 "Model": m['name'],
                 "CV Score": best_cv_score,
@@ -309,32 +284,82 @@ class AutoMLClassifierProPlus:
                 "Best Params": best_params
             })
 
-            # Bestes Modell aktualisieren
             if best_cv_score > best_score:
                 best_score = best_cv_score
                 self.best_model = search.best_estimator_
 
-        # Ergebnisse sortieren
+            elapsed = time.time() - start_time
+            mins, secs = divmod(elapsed, 60)
+            print(f"⏱ Dauer für {m['name']}: {int(mins)}m {secs:.2f}s")
+
+        total_elapsed = time.time() - total_start
+        t_mins, t_secs = divmod(total_elapsed, 60)
+        print(f"\n✅ AutoML abgeschlossen! Gesamtdauer: {int(t_mins)}m {t_secs:.2f}s")
+
         self.results_df = pd.DataFrame(results).sort_values(by="CV Score", ascending=False)
-        print("\n✅ AutoML abgeschlossen!")
         print(self.results_df)
 
-    def find(self, data, test_size=0.2, random_state=42):
+    def find(self, data, test_size=0.2, random_state=42, target_column=None, low_mem=False, reduce_to=None, reduce=None):
         """
-        Führt den kompletten AutoML-Workflow aus.
+        Führt den AutoML-Workflow aus.
+        Unterstützt sklearn-Datasets und Pandas DataFrames.
+        Low-Memory-Option: reduce_to (Prozent), reduce (Anzahl Zeilen).
         """
-        if isinstance(data, tuple):
-            X, y = data
-        else:
+        if hasattr(data, 'data') and hasattr(data, 'target'):
             X, y = data.data, data.target
+        elif isinstance(data, pd.DataFrame):
+            if target_column is None:
+                target_column = data.columns[-1]
+
+            if len(data) > 100000:
+                print(f"⚠️ Warnung: Datensatz hat {len(data)} Zeilen. Low-Memory empfohlen!")
+
+            if low_mem:
+                if reduce_to is not None:
+                    frac = min(max(reduce_to, 0.0), 1.0)
+                    print(f"⚠️ Low-Memory aktiv: Reduziere Datensatz auf {frac*100:.1f}%")
+                    data = data.sample(frac=frac, random_state=random_state)
+                elif reduce is not None:
+                    reduce = min(reduce, len(data))
+                    print(f"⚠️ Low-Memory aktiv: Reduziere Datensatz auf {reduce} Zeilen")
+                    data = data.sample(n=reduce, random_state=random_state)
+
+            X = data.drop(columns=[target_column])
+            y = data[target_column]
+        else:
+            raise ValueError("Unterstützte Formate: sklearn-Dataset oder Pandas DataFrame")
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=random_state
         )
 
-        self._automl_classification(X_train, y_train, X_test, y_test)
+        # self._automl_classification(X_train.values, y_train.values, X_test.values, y_test.values)
+
+        self._automl_classification(
+            np.array(X_train),
+            np.array(y_train),
+            np.array(X_test),
+            np.array(y_test)
+        )
 
         print("\n🏆 Bestes Modell:")
         print(self.best_model)
 
         return self.results_df, self.best_model
+
+
+# Utility-Funktion für formatierte Pipeline-Ausgabe
+def format_pipeline_info(pipeline):
+    scaler = pipeline.named_steps.get('scaler', None)
+    model = pipeline.named_steps.get('model', None)
+
+    scaler_info = f"Scaler: {scaler.__class__.__name__}" if scaler else "Scaler: Kein Scaler"
+    model_info = f"Modell: {model.__class__.__name__}"
+
+    params = {k: v for k, v in model.get_params().items() if not k.startswith('_')}
+    param_str = ", ".join([f"{k}={v}" for k, v in params.items() if k in ['kernel', 'C', 'max_iter', 'learning_rate', 'hidden_layer_sizes']])
+
+    if param_str:
+        model_info += f" ({param_str})"
+
+    return f"{scaler_info}\n{model_info}"

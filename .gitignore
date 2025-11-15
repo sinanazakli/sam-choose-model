@@ -1,2 +1,5 @@
 # ignore libs
 sam/libs/
+
+# ignore data
+data/
