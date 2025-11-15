@@ -1,8 +1,0 @@
-# ignore libs
-sam/libs/
-
-# ignore data
-data/
-
-# ignore __pycache__
-**/__pycache__/
